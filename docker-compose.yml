@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: motoserwis_app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - DATABASE_PATH=/app/data/motowarsztat.db
+      - UPLOADS_PATH=/app/uploads
+      - JWT_SECRET=${JWT_SECRET:-ZMIEN_NA_LOSOWY_KLUCZ_MIN_32_ZNAKI}
+    volumes:
+      - motoserwis_data:/app/data
+      - motoserwis_uploads:/app/uploads
+    networks:
+      - internal
+    # NIE eksponuj portu na zewnątrz — ruch idzie przez Cloudflare Tunnel
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: motoserwis_tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app
+    networks:
+      - internal
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  motoserwis_data:
+  motoserwis_uploads:
