@@ -19,11 +19,12 @@ import type { Vehicle, RepairOrder } from "@shared/schema";
 import { format } from "date-fns";
 import { pl } from "date-fns/locale";
 
-const navItems = [
+export const clientNavItems = [
   { href: "/", label: "Dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
   { href: "/pojazdy", label: "Moje pojazdy", icon: <Car className="w-4 h-4" /> },
   { href: "/zlecenia", label: "Moje zlecenia", icon: <ClipboardList className="w-4 h-4" /> },
 ];
+const navItems = clientNavItems;
 
 export default function ClientDashboard() {
   return (

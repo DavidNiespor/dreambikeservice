@@ -6,6 +6,8 @@ import { Toaster } from "@/components/ui/toaster";
 import PerplexityAttribution from "@/components/PerplexityAttribution";
 import LoginPage from "@/pages/LoginPage";
 import ClientDashboard from "@/pages/ClientDashboard";
+import ClientVehicles from "@/pages/ClientVehicles";
+import ClientOrders from "@/pages/ClientOrders";
 import MechanicDashboard from "@/pages/MechanicDashboard";
 import OwnerDashboard from "@/pages/OwnerDashboard";
 import OrderDetail from "@/pages/OrderDetail";
@@ -39,6 +41,10 @@ function AppRoutes() {
           user.role === "mechanic" ? MechanicDashboard :
           ClientDashboard
         } />
+        {/* Klient — podstrony */}
+        <Route path="/pojazdy" component={ClientVehicles} />
+        <Route path="/zlecenia" component={ClientOrders} />
+        {/* Wspólne */}
         <Route path="/orders/:id" component={OrderDetail} />
         <Route path="/vehicles/:id/history" component={VehicleHistory} />
         <Route component={NotFound} />

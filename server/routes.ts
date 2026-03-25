@@ -76,7 +76,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
   });
 
   // ===== USERS (owner only) =====
-  app.get("/api/users", requireRole("owner"), (req, res) => {
+  app.get("/api/users", requireRole("owner", "mechanic"), (req, res) => {
     const users = storage.getAllUsers().map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role, phone: u.phone, createdAt: u.createdAt }));
     res.json(users);
   });
