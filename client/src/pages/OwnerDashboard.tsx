@@ -18,8 +18,9 @@ import {
   LayoutDashboard, Users, ClipboardList, BarChart3, ChevronRight,
   Calendar, Banknote, Bike, UserPlus, Search, Filter, Package,
   Plus, AlertTriangle, ArrowUp, ArrowDown, RefreshCw, Trash2,
-  TrendingUp, Download, Edit
+  TrendingUp, Download, Edit, CheckCircle2, Car, ShieldCheck, ShieldX, Clock
 } from "lucide-react";
+import TasksPanel from "@/components/TasksPanel";
 import type { RepairOrder, Vehicle, User, Payment, Part, PartMovement } from "@shared/schema";
 import { format } from "date-fns";
 import { pl } from "date-fns/locale";
@@ -65,10 +66,17 @@ function OwnerContent() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="w-full grid grid-cols-5">
+        <TabsList className="w-full grid grid-cols-3 mb-1">
           <TabsTrigger value="dashboard" className="text-xs">Dashboard</TabsTrigger>
           <TabsTrigger value="orders" className="text-xs">Zlecenia</TabsTrigger>
-          <TabsTrigger value="users" className="text-xs">Użytkownicy</TabsTrigger>
+          <TabsTrigger value="users" className="text-xs relative">
+            Użytkownicy
+            {stats?.pendingApprovals > 0 && <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{stats.pendingApprovals}</span>}
+          </TabsTrigger>
+        </TabsList>
+        <TabsList className="w-full grid grid-cols-4">
+          <TabsTrigger value="vehicles" className="text-xs">Pojazdy</TabsTrigger>
+          <TabsTrigger value="tasks" className="text-xs">Zadania</TabsTrigger>
           <TabsTrigger value="magazine" className="text-xs relative">
             Magazyn
             {lowStock.length > 0 && <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{lowStock.length}</span>}
@@ -182,26 +190,20 @@ function OwnerContent() {
 
         {/* ===== USERS ===== */}
         <TabsContent value="users" className="space-y-3 mt-4">
-          <div className="flex justify-between items-center">
-            <p className="text-sm text-muted-foreground">{(users || []).length} użytkowników</p>
-            <AddUserDialog onSuccess={() => queryClient.invalidateQueries({ queryKey: ["/api/users"] })} />
+          <UsersTab users={users || []} loading={uLoading} />
+        </TabsContent>
+
+        {/* ===== POJAZDY ===== */}
+        <TabsContent value="vehicles" className="space-y-3 mt-4">
+          <VehiclesTab vehicles={vehicles || []} users={users || []} />
+        </TabsContent>
+
+        {/* ===== ZADANIA PRACOWNIKÓW ===== */}
+        <TabsContent value="tasks" className="space-y-3 mt-4">
+          <div>
+            <h2 className="text-sm font-semibold mb-3">Zadania pracowników</h2>
+            <TasksPanel showAll />
           </div>
-          {uLoading ? <Skeleton className="h-40 rounded-xl" /> : (
-            <div className="space-y-2">
-              {(users || []).map(u => (
-                <Card key={u.id} data-testid={`card-user-${u.id}`}>
-                  <CardContent className="py-3 px-4 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary flex-shrink-0">{u.name.charAt(0).toUpperCase()}</div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{u.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">{u.email}</p>
-                    </div>
-                    <RoleBadge role={u.role} />
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
         </TabsContent>
 
         {/* ===== MAGAZYN ===== */}
@@ -709,5 +711,159 @@ function AddUserDialog({ onSuccess }: { onSuccess: () => void }) {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── UsersTab z zatwierdzaniem kont ──────────────────────────────────────────
+function UsersTab({ users, loading }: { users: any[]; loading: boolean }) {
+  const { toast } = useToast();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+
+  const setStatus = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      apiRequest("PATCH", `/api/users/${id}/status`, { status }),
+    onSuccess: () => { invalidate(); queryClient.invalidateQueries({ queryKey: ["/api/stats"] }); },
+    onError: (e: any) => toast({ title: "Błąd", description: e.message, variant: "destructive" }),
+  });
+
+  const pending = users.filter(u => u.status === "pending");
+  const active  = users.filter(u => u.status !== "pending");
+
+  return (
+    <div className="space-y-4">
+      {/* Oczekujące na zatwierdzenie */}
+      {pending.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Clock className="w-4 h-4 text-amber-500" />
+            <h3 className="text-sm font-semibold">Czeka na zatwierdzenie ({pending.length})</h3>
+          </div>
+          <div className="space-y-2">
+            {pending.map(u => (
+              <Card key={u.id} className="border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30">
+                <CardContent className="py-3 px-4 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-amber-200 dark:bg-amber-900 flex items-center justify-center text-sm font-bold text-amber-700 dark:text-amber-300 flex-shrink-0">
+                    {u.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{u.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{u.email}{u.phone && ` · ${u.phone}`}</p>
+                    <RoleBadge role={u.role} />
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700"
+                      onClick={() => setStatus.mutate({ id: u.id, status: "active" })}
+                      disabled={setStatus.isPending}
+                      data-testid={`button-approve-${u.id}`}>
+                      <ShieldCheck className="w-3.5 h-3.5 mr-1" />Zatwierdź
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs border-destructive text-destructive hover:bg-destructive hover:text-white"
+                      onClick={() => setStatus.mutate({ id: u.id, status: "blocked" })}
+                      disabled={setStatus.isPending}
+                      data-testid={`button-block-${u.id}`}>
+                      <ShieldX className="w-3.5 h-3.5 mr-1" />Odrzuć
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Aktywni/zablokowani */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-muted-foreground">Wszyscy ({active.length})</h3>
+          <AddUserDialog onSuccess={invalidate} />
+        </div>
+        {loading ? <Skeleton className="h-40 rounded-xl" /> : (
+          <div className="space-y-2">
+            {active.map(u => (
+              <Card key={u.id} className={u.status === "blocked" ? "opacity-60" : ""} data-testid={`card-user-${u.id}`}>
+                <CardContent className="py-3 px-4 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary flex-shrink-0">
+                    {u.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{u.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{u.email}{u.phone && ` · ${u.phone}`}</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <RoleBadge role={u.role} />
+                    {u.status === "blocked" && <span className="text-xs text-red-500 font-medium">Zablokowany</span>}
+                    {u.status === "blocked" ? (
+                      <button onClick={() => setStatus.mutate({ id: u.id, status: "active" })}
+                        className="p-1 rounded text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors" title="Odblokuj">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                      </button>
+                    ) : u.role !== "owner" ? (
+                      <button onClick={() => setStatus.mutate({ id: u.id, status: "blocked" })}
+                        className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="Zablokuj">
+                        <ShieldX className="w-3.5 h-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── VehiclesTab — wszystkie pojazdy warsztatu ────────────────────────────────
+function VehiclesTab({ vehicles, users }: { vehicles: any[]; users: any[] }) {
+  const [search, setSearch] = useState("");
+  const clientMap = Object.fromEntries(users.filter(u => u.role === "client").map(u => [u.id, u]));
+
+  const filtered = vehicles.filter(v => {
+    const owner = clientMap[v.clientId];
+    return !search
+      || `${v.brand} ${v.model}`.toLowerCase().includes(search.toLowerCase())
+      || (v.licensePlate || "").toLowerCase().includes(search.toLowerCase())
+      || (owner?.name || "").toLowerCase().includes(search.toLowerCase());
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Wszystkie pojazdy ({vehicles.length})</h2>
+      </div>
+      <div className="relative">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input className="pl-9" placeholder="Szukaj pojazdu lub klienta..." value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+      <div className="space-y-2">
+        {filtered.map(v => {
+          const owner = clientMap[v.clientId];
+          return (
+            <Card key={v.id} data-testid={`card-vehicle-${v.id}`}>
+              <CardContent className="py-3 px-4 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Car className="w-4 h-4 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm truncate">{v.brand} {v.model}</p>
+                  <div className="flex gap-2 text-xs text-muted-foreground">
+                    {v.year && <span>{v.year}</span>}
+                    {v.licensePlate && <span>· {v.licensePlate}</span>}
+                    {v.engineSize && <span>· {v.engineSize}</span>}
+                  </div>
+                  {owner && <p className="text-xs text-primary mt-0.5 font-medium">{owner.name}{owner.phone && ` · ${owner.phone}`}</p>}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+        {filtered.length === 0 && (
+          <Card className="border-dashed">
+            <CardContent className="py-8 text-center text-muted-foreground text-sm">Brak pojazdów</CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
   );
 }

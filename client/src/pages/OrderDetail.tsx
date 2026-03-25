@@ -2,6 +2,8 @@ import { useState, useRef } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, apiFetch, getAuthToken } from "@/lib/queryClient";
+import CommentsPanel from "@/components/CommentsPanel";
+import TasksPanel from "@/components/TasksPanel";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import AppLayout from "@/components/AppLayout";
@@ -141,11 +143,25 @@ function OrderDetailContent({ order }: { order: RepairOrder }) {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="w-full">
           <TabsTrigger value="info" className="flex-1 text-xs">Info</TabsTrigger>
-          <TabsTrigger value="quotes" className="flex-1 text-xs">Wycena {quotes.length > 0 && `(${quotes.length})`}</TabsTrigger>
-          <TabsTrigger value="work" className="flex-1 text-xs">Prace {works.length > 0 && `(${works.length})`}</TabsTrigger>
-          <TabsTrigger value="photos" className="flex-1 text-xs">Zdjęcia {photos.length > 0 && `(${photos.length})`}</TabsTrigger>
+          <TabsTrigger value="comments" className="flex-1 text-xs">Koment.</TabsTrigger>
+          <TabsTrigger value="quotes" className="flex-1 text-xs">Wycena</TabsTrigger>
+          <TabsTrigger value="work" className="flex-1 text-xs">Prace</TabsTrigger>
+          <TabsTrigger value="photos" className="flex-1 text-xs">Zdjęcia</TabsTrigger>
+          {isMechOwner && <TabsTrigger value="tasks" className="flex-1 text-xs">Zadania</TabsTrigger>}
           {isOwner && <TabsTrigger value="payment" className="flex-1 text-xs">Płatność</TabsTrigger>}
         </TabsList>
+
+        {/* KOMENTARZE */}
+        <TabsContent value="comments" className="mt-4">
+          <CommentsPanel orderId={order.id} />
+        </TabsContent>
+
+        {/* ZADANIA */}
+        {isMechOwner && (
+          <TabsContent value="tasks" className="mt-4">
+            <TasksPanel orderId={order.id} />
+          </TabsContent>
+        )}
 
         {/* INFO */}
         <TabsContent value="info" className="mt-4 space-y-3">

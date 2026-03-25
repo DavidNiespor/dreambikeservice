@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, or } from "drizzle-orm";
 import * as schema from "@shared/schema";
 import type {
   User, InsertUser,
@@ -8,6 +8,8 @@ import type {
   RepairOrder, InsertRepairOrder,
   QuoteItem, InsertQuoteItem,
   WorkEntry, InsertWorkEntry,
+  Comment, InsertComment,
+  Task, InsertTask,
   Photo, InsertPhoto,
   Part, InsertPart,
   PartMovement, InsertPartMovement,
@@ -18,7 +20,6 @@ const dbPath = process.env.DATABASE_PATH || "motowarsztat.db";
 const sqlite = new Database(dbPath);
 const db = drizzle(sqlite, { schema });
 
-// Create tables
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,6 +28,7 @@ sqlite.exec(`
     phone TEXT,
     password TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'client',
+    status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL
   );
 
@@ -81,6 +83,29 @@ sqlite.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repair_order_id INTEGER NOT NULL REFERENCES repair_orders(id),
+    author_id INTEGER NOT NULL REFERENCES users(id),
+    content TEXT NOT NULL,
+    visibility TEXT NOT NULL DEFAULT 'public',
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repair_order_id INTEGER REFERENCES repair_orders(id),
+    assigned_to INTEGER NOT NULL REFERENCES users(id),
+    assigned_by INTEGER NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    description TEXT,
+    due_date TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    done_note TEXT,
+    done_at TEXT,
+    created_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS photos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     repair_order_id INTEGER NOT NULL REFERENCES repair_orders(id),
@@ -129,67 +154,22 @@ sqlite.exec(`
     paid_at TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+
 `);
+
+// Ignoruj błąd "duplicate column" przy migracji
+// Migracje bezpieczne
+try { sqlite.exec(`ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`); } catch {}
+try { sqlite.exec(`ALTER TABLE users ADD COLUMN phone TEXT`); } catch {}
+try { sqlite.exec(`CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, repair_order_id INTEGER NOT NULL REFERENCES repair_orders(id), author_id INTEGER NOT NULL REFERENCES users(id), content TEXT NOT NULL, visibility TEXT NOT NULL DEFAULT 'public', created_at TEXT NOT NULL)`); } catch {}
+try { sqlite.exec(`CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, repair_order_id INTEGER REFERENCES repair_orders(id), assigned_to INTEGER NOT NULL REFERENCES users(id), assigned_by INTEGER NOT NULL REFERENCES users(id), title TEXT NOT NULL, description TEXT, due_date TEXT, status TEXT NOT NULL DEFAULT 'pending', done_note TEXT, done_at TEXT, created_at TEXT NOT NULL)`); } catch {}
+// Aktywuj istniejących ownerów / mechaników bez statusu
+try { sqlite.exec(`UPDATE users SET status = 'active' WHERE (status IS NULL OR status = '' OR status = 'pending') AND role = 'owner'`); } catch {}
 
 const now = () => new Date().toISOString();
 
-export interface IStorage {
-  // Users
-  getUserById(id: number): User | undefined;
-  getUserByEmail(email: string): User | undefined;
-  createUser(data: InsertUser): User;
-  getAllUsers(): User[];
-  updateUser(id: number, data: Partial<InsertUser>): User | undefined;
-
-  // Vehicles
-  getVehicleById(id: number): Vehicle | undefined;
-  getVehiclesByClient(clientId: number): Vehicle[];
-  getAllVehicles(): Vehicle[];
-  createVehicle(data: InsertVehicle): Vehicle;
-  updateVehicle(id: number, data: Partial<InsertVehicle>): Vehicle | undefined;
-
-  // Repair Orders
-  getRepairOrderById(id: number): RepairOrder | undefined;
-  getRepairOrdersByClient(clientId: number): RepairOrder[];
-  getRepairOrdersByVehicle(vehicleId: number): RepairOrder[];
-  getRepairOrdersByMechanic(mechanicId: number): RepairOrder[];
-  getAllRepairOrders(): RepairOrder[];
-  createRepairOrder(data: InsertRepairOrder): RepairOrder;
-  updateRepairOrder(id: number, data: Partial<InsertRepairOrder>): RepairOrder | undefined;
-
-  // Quote Items
-  getQuoteItemsByOrder(repairOrderId: number): QuoteItem[];
-  createQuoteItem(data: InsertQuoteItem): QuoteItem;
-  deleteQuoteItem(id: number): void;
-  deleteQuoteItemsByOrder(repairOrderId: number): void;
-
-  // Work Entries
-  getWorkEntriesByOrder(repairOrderId: number): WorkEntry[];
-  createWorkEntry(data: InsertWorkEntry): WorkEntry;
-  deleteWorkEntry(id: number): void;
-
-  // Photos
-  getPhotosByOrder(repairOrderId: number): Photo[];
-  createPhoto(data: InsertPhoto): Photo;
-  deletePhoto(id: number): Photo | undefined;
-
-  // Parts
-  getAllParts(): Part[];
-  getPartById(id: number): Part | undefined;
-  createPart(data: InsertPart): Part;
-  updatePart(id: number, data: Partial<InsertPart>): Part | undefined;
-  deletePart(id: number): void;
-  getMovementsByPart(partId: number): PartMovement[];
-  getAllMovements(): PartMovement[];
-  createPartMovement(data: InsertPartMovement): PartMovement;
-
-  // Payments
-  getPaymentsByOrder(repairOrderId: number): Payment[];
-  getAllPayments(): Payment[];
-  createPayment(data: InsertPayment): Payment;
-}
-
-export class SqliteStorage implements IStorage {
+export class SqliteStorage {
+  // ─── Users ─────────────────────────────────────────────────────────────
   getUserById(id: number) {
     return db.select().from(schema.users).where(eq(schema.users.id, id)).get();
   }
@@ -199,21 +179,25 @@ export class SqliteStorage implements IStorage {
   createUser(data: InsertUser): User {
     return db.insert(schema.users).values({ ...data, createdAt: now() }).returning().get();
   }
-  getAllUsers() {
+  getAllUsers(): User[] {
     return db.select().from(schema.users).orderBy(desc(schema.users.createdAt)).all();
   }
   updateUser(id: number, data: Partial<InsertUser>) {
     return db.update(schema.users).set(data).where(eq(schema.users.id, id)).returning().get();
   }
+  getPendingUsers(): User[] {
+    return db.select().from(schema.users).where(eq(schema.users.status, "pending")).all();
+  }
 
+  // ─── Vehicles ───────────────────────────────────────────────────────────
   getVehicleById(id: number) {
     return db.select().from(schema.vehicles).where(eq(schema.vehicles.id, id)).get();
   }
-  getVehiclesByClient(clientId: number) {
+  getVehiclesByClient(clientId: number): Vehicle[] {
     return db.select().from(schema.vehicles).where(eq(schema.vehicles.clientId, clientId)).all();
   }
-  getAllVehicles() {
-    return db.select().from(schema.vehicles).all();
+  getAllVehicles(): Vehicle[] {
+    return db.select().from(schema.vehicles).orderBy(desc(schema.vehicles.createdAt)).all();
   }
   createVehicle(data: InsertVehicle): Vehicle {
     return db.insert(schema.vehicles).values({ ...data, createdAt: now() }).returning().get();
@@ -222,19 +206,21 @@ export class SqliteStorage implements IStorage {
     return db.update(schema.vehicles).set(data).where(eq(schema.vehicles.id, id)).returning().get();
   }
 
+  // ─── Repair Orders ──────────────────────────────────────────────────────
   getRepairOrderById(id: number) {
     return db.select().from(schema.repairOrders).where(eq(schema.repairOrders.id, id)).get();
   }
-  getRepairOrdersByClient(clientId: number) {
-    return db.select().from(schema.repairOrders).where(eq(schema.repairOrders.clientId, clientId)).orderBy(desc(schema.repairOrders.createdAt)).all();
+  getRepairOrdersByClient(clientId: number): RepairOrder[] {
+    return db.select().from(schema.repairOrders)
+      .where(eq(schema.repairOrders.clientId, clientId))
+      .orderBy(desc(schema.repairOrders.createdAt)).all();
   }
-  getRepairOrdersByVehicle(vehicleId: number) {
-    return db.select().from(schema.repairOrders).where(eq(schema.repairOrders.vehicleId, vehicleId)).orderBy(desc(schema.repairOrders.createdAt)).all();
+  getRepairOrdersByVehicle(vehicleId: number): RepairOrder[] {
+    return db.select().from(schema.repairOrders)
+      .where(eq(schema.repairOrders.vehicleId, vehicleId))
+      .orderBy(desc(schema.repairOrders.createdAt)).all();
   }
-  getRepairOrdersByMechanic(mechanicId: number) {
-    return db.select().from(schema.repairOrders).where(eq(schema.repairOrders.mechanicId, mechanicId)).orderBy(desc(schema.repairOrders.createdAt)).all();
-  }
-  getAllRepairOrders() {
+  getAllRepairOrders(): RepairOrder[] {
     return db.select().from(schema.repairOrders).orderBy(desc(schema.repairOrders.createdAt)).all();
   }
   createRepairOrder(data: InsertRepairOrder): RepairOrder {
@@ -244,7 +230,8 @@ export class SqliteStorage implements IStorage {
     return db.update(schema.repairOrders).set(data).where(eq(schema.repairOrders.id, id)).returning().get();
   }
 
-  getQuoteItemsByOrder(repairOrderId: number) {
+  // ─── Quote Items ────────────────────────────────────────────────────────
+  getQuoteItemsByOrder(repairOrderId: number): QuoteItem[] {
     return db.select().from(schema.quoteItems).where(eq(schema.quoteItems.repairOrderId, repairOrderId)).all();
   }
   createQuoteItem(data: InsertQuoteItem): QuoteItem {
@@ -257,8 +244,11 @@ export class SqliteStorage implements IStorage {
     db.delete(schema.quoteItems).where(eq(schema.quoteItems.repairOrderId, repairOrderId)).run();
   }
 
-  getWorkEntriesByOrder(repairOrderId: number) {
-    return db.select().from(schema.workEntries).where(eq(schema.workEntries.repairOrderId, repairOrderId)).orderBy(desc(schema.workEntries.createdAt)).all();
+  // ─── Work Entries ───────────────────────────────────────────────────────
+  getWorkEntriesByOrder(repairOrderId: number): WorkEntry[] {
+    return db.select().from(schema.workEntries)
+      .where(eq(schema.workEntries.repairOrderId, repairOrderId))
+      .orderBy(desc(schema.workEntries.createdAt)).all();
   }
   createWorkEntry(data: InsertWorkEntry): WorkEntry {
     return db.insert(schema.workEntries).values({ ...data, createdAt: now() }).returning().get();
@@ -267,20 +257,71 @@ export class SqliteStorage implements IStorage {
     db.delete(schema.workEntries).where(eq(schema.workEntries.id, id)).run();
   }
 
-  getPhotosByOrder(repairOrderId: number) {
+  // ─── Comments ───────────────────────────────────────────────────────────
+  getCommentsByOrder(repairOrderId: number, includePrivate: boolean): Comment[] {
+    if (includePrivate) {
+      return db.select().from(schema.comments)
+        .where(eq(schema.comments.repairOrderId, repairOrderId))
+        .orderBy(schema.comments.createdAt).all();
+    }
+    return db.select().from(schema.comments)
+      .where(and(
+        eq(schema.comments.repairOrderId, repairOrderId),
+        eq(schema.comments.visibility, "public")
+      ))
+      .orderBy(schema.comments.createdAt).all();
+  }
+  createComment(data: InsertComment): Comment {
+    return db.insert(schema.comments).values({ ...data, createdAt: now() }).returning().get();
+  }
+  deleteComment(id: number) {
+    db.delete(schema.comments).where(eq(schema.comments.id, id)).run();
+  }
+
+  // ─── Tasks ──────────────────────────────────────────────────────────────
+  getTasksByAssignee(userId: number): Task[] {
+    return db.select().from(schema.tasks)
+      .where(eq(schema.tasks.assignedTo, userId))
+      .orderBy(desc(schema.tasks.createdAt)).all();
+  }
+  getAllTasks(): Task[] {
+    return db.select().from(schema.tasks).orderBy(desc(schema.tasks.createdAt)).all();
+  }
+  getTasksByOrder(repairOrderId: number): Task[] {
+    return db.select().from(schema.tasks)
+      .where(eq(schema.tasks.repairOrderId, repairOrderId)).all();
+  }
+  createTask(data: InsertTask): Task {
+    return db.insert(schema.tasks).values({ ...data, createdAt: now() }).returning().get();
+  }
+  updateTask(id: number, data: Partial<InsertTask> & { doneAt?: string }): Task | undefined {
+    return db.update(schema.tasks).set(data).where(eq(schema.tasks.id, id)).returning().get();
+  }
+  deleteTask(id: number) {
+    db.delete(schema.tasks).where(eq(schema.tasks.id, id)).run();
+  }
+  getTodayTasks(userId: number): Task[] {
+    const today = new Date().toISOString().slice(0, 10);
+    return db.select().from(schema.tasks)
+      .where(and(eq(schema.tasks.assignedTo, userId), eq(schema.tasks.dueDate, today)))
+      .orderBy(schema.tasks.status).all();
+  }
+
+  // ─── Photos ─────────────────────────────────────────────────────────────
+  getPhotosByOrder(repairOrderId: number): Photo[] {
     return db.select().from(schema.photos).where(eq(schema.photos.repairOrderId, repairOrderId)).all();
   }
   createPhoto(data: InsertPhoto): Photo {
     return db.insert(schema.photos).values({ ...data, createdAt: now() }).returning().get();
   }
-  deletePhoto(id: number) {
+  deletePhoto(id: number): Photo | undefined {
     const photo = db.select().from(schema.photos).where(eq(schema.photos.id, id)).get();
     db.delete(schema.photos).where(eq(schema.photos.id, id)).run();
     return photo;
   }
 
-  // Parts
-  getAllParts() {
+  // ─── Parts ──────────────────────────────────────────────────────────────
+  getAllParts(): Part[] {
     return db.select().from(schema.parts).orderBy(schema.parts.name).all();
   }
   getPartById(id: number) {
@@ -295,28 +336,33 @@ export class SqliteStorage implements IStorage {
   deletePart(id: number) {
     db.delete(schema.parts).where(eq(schema.parts.id, id)).run();
   }
-  getMovementsByPart(partId: number) {
-    return db.select().from(schema.partMovements).where(eq(schema.partMovements.partId, partId)).orderBy(desc(schema.partMovements.createdAt)).all();
+  getMovementsByPart(partId: number): PartMovement[] {
+    return db.select().from(schema.partMovements)
+      .where(eq(schema.partMovements.partId, partId))
+      .orderBy(desc(schema.partMovements.createdAt)).all();
   }
-  getAllMovements() {
+  getAllMovements(): PartMovement[] {
     return db.select().from(schema.partMovements).orderBy(desc(schema.partMovements.createdAt)).all();
   }
   createPartMovement(data: InsertPartMovement): PartMovement {
     const mv = db.insert(schema.partMovements).values({ ...data, createdAt: now() }).returning().get();
-    // update stock
     const part = this.getPartById(data.partId);
     if (part) {
-      const delta = data.type === "in" ? data.qty : data.type === "out" ? -data.qty : data.qty - part.stockQty;
-      const newQty = data.type === "adjustment" ? data.qty : part.stockQty + delta;
-      db.update(schema.parts).set({ stockQty: Math.max(0, newQty) }).where(eq(schema.parts.id, data.partId)).run();
+      const newQty = data.type === "adjustment"
+        ? data.qty
+        : data.type === "in"
+          ? part.stockQty + data.qty
+          : Math.max(0, part.stockQty - data.qty);
+      db.update(schema.parts).set({ stockQty: newQty }).where(eq(schema.parts.id, data.partId)).run();
     }
     return mv;
   }
 
-  getPaymentsByOrder(repairOrderId: number) {
+  // ─── Payments ───────────────────────────────────────────────────────────
+  getPaymentsByOrder(repairOrderId: number): Payment[] {
     return db.select().from(schema.payments).where(eq(schema.payments.repairOrderId, repairOrderId)).all();
   }
-  getAllPayments() {
+  getAllPayments(): Payment[] {
     return db.select().from(schema.payments).orderBy(desc(schema.payments.createdAt)).all();
   }
   createPayment(data: InsertPayment): Payment {

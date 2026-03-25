@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Clock } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", phone: "", password: "", role: "client" });
 
+  const [pendingMsg, setPendingMsg] = useState("");
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -21,10 +24,21 @@ export default function LoginPage() {
       if (mode === "login") {
         await login(form.email, form.password);
       } else {
-        await register(form);
+        const result = await register(form);
+        if ((result as any)?.pendingApproval) {
+          setPendingMsg("Konto założone. Właściciel warsztatu musi je zatwierdzić przed pierwszym logowaniem.");
+          return;
+        }
       }
     } catch (err: any) {
-      toast({ title: "Błąd", description: err.message || "Nieprawidłowe dane", variant: "destructive" });
+      const msg = err.message || "";
+      if (msg.includes("ACCOUNT_PENDING")) {
+        setPendingMsg("Konto czeka na zatwierdzenie przez właściciela warsztatu.");
+      } else if (msg.includes("ACCOUNT_BLOCKED")) {
+        toast({ title: "Konto zablokowane", description: "Skontaktuj się z właścicielem warsztatu.", variant: "destructive" });
+      } else {
+        toast({ title: "Błąd", description: msg || "Nieprawidłowe dane", variant: "destructive" });
+      }
     } finally {
       setLoading(false);
     }
@@ -32,6 +46,12 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
+      {pendingMsg && (
+        <div className="w-full max-w-sm mb-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded-xl p-4 flex gap-3">
+          <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-800 dark:text-amber-200">{pendingMsg}</p>
+        </div>
+      )}
       {/* Logo */}
       <div className="flex flex-col items-center mb-8 gap-3">
         <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shadow-md">

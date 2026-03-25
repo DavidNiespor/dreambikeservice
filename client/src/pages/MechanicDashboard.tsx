@@ -15,7 +15,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { LayoutDashboard, ClipboardList, Search, ChevronRight, Calendar, Filter, Plus, User, Car } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Search, ChevronRight, Calendar, Filter, Plus, User, Car, CheckCircle2 } from "lucide-react";
+import TasksPanel from "@/components/TasksPanel";
 import type { RepairOrder, Vehicle, User as UserType } from "@shared/schema";
 import { format } from "date-fns";
 import { pl } from "date-fns/locale";
@@ -71,6 +72,9 @@ function MechanicContent() {
         </div>
         <NewOrderMechanicDialog onSuccess={invalidateOrders} />
       </div>
+
+      {/* Moje dzisiejsze zadania */}
+      <TodayTasksSection />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2">
@@ -352,5 +356,30 @@ function NewOrderMechanicDialog({ onSuccess }: { onSuccess: () => void }) {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Dzisiejsze zadania mechanika ─────────────────────────────────────────────
+function TodayTasksSection() {
+  const { data: tasks = [], isLoading } = useQuery<any[]>({
+    queryKey: ["/api/tasks/today"],
+    queryFn: async () => {
+      const { apiFetch } = await import("@/lib/queryClient");
+      const r = await apiFetch("/api/tasks/today");
+      return r.json();
+    },
+  });
+
+  const pending = tasks.filter(t => t.status !== "done");
+  if (isLoading || tasks.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <CheckCircle2 className="w-4 h-4 text-primary" />
+        <p className="text-sm font-semibold">Moje zadania na dziś ({pending.length} do zrobienia)</p>
+      </div>
+      <TasksPanel />
+    </div>
   );
 }

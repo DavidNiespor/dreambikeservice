@@ -39,12 +39,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   };
 
-  const register = async (body: any) => {
+  const register = async (body: any): Promise<any> => {
     const res = await apiRequest("POST", "/api/auth/register", body);
     const data = await res.json();
+    if (data.pendingApproval) return data; // konto czeka na zatwierdzenie
     setAuthToken(data.token);
     const u = { id: data.id, name: data.name, email: data.email, role: data.role, phone: data.phone };
     setUser(u);
+    return data;
   };
 
   const logout = () => {
